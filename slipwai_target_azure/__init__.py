@@ -27,6 +27,7 @@ from slipwai.target_protocol import (
     README_WORDS,
     REGION,
     SCRIPTS,
+    SETUP,
     SHAPES,
     TOOLS,
     Target,
@@ -57,6 +58,7 @@ STACKS = {'bootstrap': ('bootstrap/main.tf', 'bootstrap/outputs.tf', 'bootstrap/
 #: What a generated project gets under `scripts/`, by the path it lands at. These run inside a project,
 #: which has no slipwai to import: the standard library only.
 PROJECT_SCRIPTS = {'scripts/bootstrap.py': 'scripts/bootstrap.py',
+    'scripts/setup.py': 'scripts/setup.py',
     'scripts/check-flags.py': 'scripts/check-flags.py',
     'scripts/deploy.py': 'scripts/deploy.py'}
 
@@ -197,6 +199,7 @@ TARGET = Target(
         AGENT_RULES: RULES,
         ADD_COMMANDS: AFTERWARDS,
         REGION: WHERE,
+        SETUP: 'scripts/setup.py',
         PREREQUISITES: BEFORE_INIT,
         FLAG_TRANSPORTS: TRANSPORTS,
     },
