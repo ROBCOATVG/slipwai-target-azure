@@ -35,8 +35,11 @@ What it decides for you, and how:
   production yet. From `AUTO_PROMOTE=`/`--auto-promote`, else `infra/auto-promote` — the answer a previous
   run wrote down; else, in a terminal, it asks once and writes that file. Written to the forge as the
   `AUTO_PROMOTE` variable, which is the only thing `deploy.yml` reads to decide.
-- **The passphrase** encrypting the committed bootstrap state: `TF_VAR_state_passphrase` if set; otherwise a
-  new one is generated for a first run and printed once — keep it, nothing else ever knows it.
+- **The passphrase** encrypting the committed bootstrap state: `TF_VAR_state_passphrase` if set; else, where
+  the state already exists, read back from the subscription — the stack keeps it as the secret
+  `state-passphrase` in a vault of its own, whose name is recorded in `infra/passphrase-vault`, readable by
+  whoever holds a secrets role on that vault; otherwise a new one is generated for a first run, printed once,
+  and kept there by the apply. Keep the printed copy too: a subscription that is gone takes the vault with it.
 - **The repository's configuration**: variables (identifiers) and, on a forge without OIDC, secrets (the key),
   written with `gh` on GitHub and the REST API on Gitea (`GITEA_TOKEN`, or `--token`). On GitHub it also
   creates the `staging` and `production` environments the deploy workflows name, each deployable from `main`
@@ -61,6 +64,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STACK = ROOT / "infra/bootstrap"
 STATE = STACK / "terraform.tfstate"
+# Where the subscription keeps the passphrase: one secret in a vault the bootstrap stack creates, so a later
+# `make bootstrap` — from somebody else's laptop, say — reads it back rather than asking a person to find
+# it. The vault's name is an output, recorded beside the state (RECORDED) because reading the secret is the
+# one thing that has to happen before the state can be read.
+PASSPHRASE_SECRET = "state-passphrase"
+VAULT_FILE = ROOT / "infra/passphrase-vault"
 # Where the location is remembered once it has been decided, so it is asked once, not on every verb.
 LOCATION_FILE = ROOT / "infra/location"
 # The same, for whether a green commit is promoted to production by itself. Committed like the region, so a
@@ -114,6 +123,7 @@ RECORDED = {
     "infra/state-resource-group": "state_resource_group",
     "infra/state-account": "state_storage_account",
     "infra/state-container": "state_container",
+    "infra/passphrase-vault": "passphrase_vault",
 }
 
 # The two environments the deploy workflows name, which are the two `infra/service/variables.tf` admits.
@@ -259,15 +269,34 @@ def auto_promote(given: str | None, ask: bool) -> str:
     return found
 
 
+def kept_passphrase() -> str | None:
+    """The passphrase the subscription keeps, or nothing where it has none — a project bootstrapped before the
+    stack kept one, or a sign-in that may not read it — so the caller can say what to do instead."""
+    if not VAULT_FILE.is_file():
+        return None
+    found = subprocess.run(
+        ["az", "keyvault", "secret", "show", "--vault-name", VAULT_FILE.read_text(encoding="utf-8").strip(),
+         "--name", PASSPHRASE_SECRET, "--query", "value", "--output", "tsv", "--only-show-errors"],
+        text=True, capture_output=True,
+    )
+    return found.stdout.strip() or None if found.returncode == 0 else None
+
+
 def passphrase() -> tuple[str, bool]:
     """The state passphrase, and whether it was made just now."""
     given = os.environ.get("TF_VAR_state_passphrase")
     if given:
         return given, False
     if STATE.exists():
+        kept = kept_passphrase()
+        if kept:
+            print(f"passphrase read back from the subscription (secret {PASSPHRASE_SECRET} in the vault "
+                  f"{VAULT_FILE.relative_to(ROOT)} names)", file=sys.stderr)
+            return kept, False
         raise Failure(
-            "infra/bootstrap/terraform.tfstate exists and is encrypted: set TF_VAR_state_passphrase to the "
-            "passphrase it was created with before running again"
+            "infra/bootstrap/terraform.tfstate exists and is encrypted, and the subscription has no readable copy "
+            f"of its passphrase (secret {PASSPHRASE_SECRET} in the vault {VAULT_FILE.relative_to(ROOT)} names): "
+            "set TF_VAR_state_passphrase to the passphrase it was created with before running again"
         )
     return secrets.token_urlsafe(32), True
 
@@ -742,7 +771,11 @@ def plan(decision: dict) -> None:
     print("configure    variables " + ", ".join([*VARIABLES, PROMOTE_VARIABLE]) + (" and secrets " + ", ".join(SECRETS) if key else ""))
     if decision["forge"] == "github":
         print("environments " + " and ".join(ENVIRONMENTS) + f", each deploying from {DEPLOY_BRANCH} only")
-    print("passphrase   " + ("TF_VAR_state_passphrase, as set" if os.environ.get("TF_VAR_state_passphrase") else "generated now and printed once" if not STATE.exists() else "REQUIRED: the state exists and TF_VAR_state_passphrase is not set"))
+    print("passphrase   " + (
+        "TF_VAR_state_passphrase, as set" if os.environ.get("TF_VAR_state_passphrase")
+        else f"generated now, printed once and kept in the subscription as the secret {PASSPHRASE_SECRET}"
+        if not STATE.exists()
+        else f"read back from the subscription (secret {PASSPHRASE_SECRET}); TF_VAR_state_passphrase overrides it"))
 
 
 def bootstrap(args: argparse.Namespace) -> None:
@@ -768,8 +801,11 @@ def bootstrap(args: argparse.Namespace) -> None:
         # Before the apply, not after: a failed first apply still writes an encrypted state, and a passphrase
         # only shown on success would be one nobody has.
         print(
-            f"\nThe committed bootstrap state will be encrypted with a passphrase generated now. Keep it — it is "
-            f"what every later `make bootstrap` needs, and nothing else knows it:\n  TF_VAR_state_passphrase={phrase}\n",
+            f"\nThe committed bootstrap state will be encrypted with a passphrase generated now. The apply keeps "
+            f"it in the subscription as the secret {PASSPHRASE_SECRET}, in a vault of its own whose name it writes "
+            f"to {VAULT_FILE.relative_to(ROOT)}, and a later `make bootstrap` signed in there reads it back. Keep "
+            f"this copy too — a subscription that is gone takes the vault with it:\n"
+            f"  TF_VAR_state_passphrase={phrase}\n",
             file=sys.stderr,
         )
     env = {
@@ -807,7 +843,8 @@ def bootstrap(args: argparse.Namespace) -> None:
             print(f"  secret   {name} = (from `tofu -chdir=infra/bootstrap output -raw {SECRETS[name]}`)")
     print("\nbootstrapped. Now:")
     if fresh:
-        print(f"  1. Keep the passphrase printed above (TF_VAR_state_passphrase={phrase}); it decrypts the state.")
+        print(f"  1. Keep the passphrase printed above (TF_VAR_state_passphrase={phrase}); the subscription keeps it "
+              f"as the secret {PASSPHRASE_SECRET}, and this is the copy for the day it cannot.")
     print(
         "  2. git add infra/bootstrap/terraform.tfstate infra/bootstrap/.terraform.lock.hcl "
         + " ".join(sorted(RECORDED))

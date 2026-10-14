@@ -3,6 +3,20 @@
 No releases yet. Release notes are recorded here newest first, one entry per released version; the entry being
 written is `changelog.d/`.
 
+## 1.2.0 — MINOR
+
+**The subscription keeps the passphrase that decrypts the committed bootstrap state.** The first
+`make bootstrap` still generates one and prints it once, and the apply now keeps it as the secret
+`state-passphrase` in a Key Vault of its own in the bootstrap group, RBAC like the service stack's, with the
+applying sign-in as its secrets officer. The vault's name is written to `infra/passphrase-vault` beside the
+state, and a later `make bootstrap` — from somebody else's laptop, say — signed in to the subscription reads
+the secret back; `TF_VAR_state_passphrase` still overrides it. Whoever holds a secrets role on that vault may
+decrypt the state, which is the trust the encrypted state already assumed.
+
+**Catch-up:** `make bootstrap` once, with `TF_VAR_state_passphrase` set as before: that apply creates the
+vault and the secret and writes `infra/passphrase-vault` — commit it with the state — and the next run needs
+nothing.
+
 ## 1.1.0 — MINOR
 
 **`./init` installs what bootstrapping Azure needs, through this package's own setup script.** The

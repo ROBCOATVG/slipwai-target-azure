@@ -31,6 +31,11 @@ output "state_container" {
   value       = azurerm_storage_container.state.name
 }
 
+output "passphrase_vault" {
+  description = "The vault keeping the state passphrase as the secret `state-passphrase`; `make bootstrap` records the name in `infra/passphrase-vault` and reads the secret back from there."
+  value       = azurerm_key_vault.bootstrap.name
+}
+
 output "deploy_client_id" {
   description = "AZURE_CLIENT_ID: what the deploy workflow signs in as."
   value       = local.deploy_client_id

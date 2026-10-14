@@ -17,8 +17,8 @@ them; `docs/adr/0002-production-target.md` is why each part is what it is, and w
 `./init` does this project's first day: it installs Spec Kit, then asks for the repository to push to,
 pushes `main`, and runs `make bootstrap` against your Azure subscription — so the push is the first deploy,
 and everything below is what that last step needs. Have all of it on the machine that runs `./init`. A later
-`make bootstrap` wants the same list, except that row 7 is then a passphrase to supply rather than one to
-keep.
+`make bootstrap` wants the same list, except that row 7 is then a passphrase the subscription hands back
+rather than one to keep.
 
 | | Have | What needs it | Proof it is there |
 |---|---|---|---|
@@ -28,7 +28,7 @@ keep.
 | 4 | **A region** — `export AZURE_LOCATION=uksouth`, or `az config set defaults.location=uksouth` — unless `infra/location` is already committed | Azure has no ambient region: every resource carries a location, so this is a value the stacks cannot be applied without. It is written to `infra/location`, which every later `make bootstrap`, `make deploy` and `make url` reads | `az config get defaults.location` |
 | 5 | **Access to your forge.** GitHub: `gh` on the PATH and signed in. Gitea: `GITEA_TOKEN` set to a token with `read:user` and `write:repository` — plus `write:organization` if the repository will belong to an organisation | it creates the repository, private, if it is not there, and writes the variables and the secret the pipeline signs in to Azure with | `gh auth status` · `echo ${GITEA_TOKEN:+set}` |
 | 6 | **The repository's URL**, if `origin` is not set yet — `https://github.com/<owner>/<name>`, `http://localhost:3300/<owner>/<name>` — and whatever a `git push` to it needs | the pipeline is configured on the forge, so the bootstrap has to know which repository this is | `git remote get-url origin` |
-| 7 | **Somewhere to keep a passphrase.** The first `make bootstrap` generates one and prints it once; every run after it needs the same one back in `TF_VAR_state_passphrase` | it encrypts `bootstrap/terraform.tfstate`, which is committed to this repository | a password manager |
+| 7 | **Somewhere to keep a passphrase.** The first `make bootstrap` generates one, prints it once, and keeps it in the subscription as the secret `state-passphrase` in a vault of its own (`infra/passphrase-vault` names it); every run after it reads it back from there, or takes `TF_VAR_state_passphrase` | it encrypts `bootstrap/terraform.tfstate`, which is committed to this repository | a password manager, for the day the subscription is gone |
 
 **Directory rights, where the subscription's are not enough.** Everything in row 3 is *subscription* RBAC,
 and an app registration is not a subscription resource: it is a **directory** object, outside that RBAC
@@ -110,9 +110,11 @@ What it does, in order:
 
 1. Settles the location (asking once, if nothing says), then reads the sign-in and says which subscription
    and identity it is using, and refuses if that identity is not an Owner of it.
-2. Generates the passphrase that encrypts the committed bootstrap state — on a first run; afterwards it
-   needs the same one in `TF_VAR_state_passphrase` — and prints it once at the end. Keep it in a password
-   manager. Nothing but a later `make bootstrap` ever needs it.
+2. Settles the passphrase that encrypts the committed bootstrap state. On a first run it generates one,
+   prints it once, and the apply keeps it in the subscription as the secret `state-passphrase` in a vault
+   of its own, whose name is written to `infra/passphrase-vault` beside the state; afterwards it reads that
+   back, unless `TF_VAR_state_passphrase` is set. Keep the printed copy in a password manager anyway: a
+   subscription that is gone takes the vault with it. Nothing but a later `make bootstrap` ever needs it.
 3. Applies `bootstrap/`. On GitHub the pipeline will sign in with a federated credential and no stored
    credential at all; the credentials name this repository and nothing else, spelled the way GitHub spells
    it in the token — the script asks the repository's OIDC customization endpoint for the `sub` prefix,

@@ -5,9 +5,10 @@
 # decides for you.
 #
 # Its own state is committed to this repository, encrypted with OpenTofu's native state encryption under a
-# passphrase the script generates once and prints, so there is no imperative "create the storage account
-# first" step and nothing to bootstrap the bootstrap. Without the passphrase the file is noise; with it,
-# `tofu output` here is the source of every identifier the pipeline is configured with.
+# passphrase the script generates once and prints — and which the subscription then keeps (the vault below)
+# — so there is no imperative "create the storage account first" step and nothing to bootstrap the
+# bootstrap. Without the passphrase the file is noise; with it, `tofu output` here is the source of every
+# identifier the pipeline is configured with.
 
 terraform {
   required_version = ">= 1.12.0"
@@ -20,6 +21,11 @@ terraform {
     azuread = {
       source  = "hashicorp/azuread"
       version = "3.9.0"
+    }
+    # One resource, `time_sleep`, and only for the RBAC replication delay the passphrase section explains.
+    time = {
+      source  = "hashicorp/time"
+      version = "0.13.1"
     }
   }
 
@@ -120,6 +126,50 @@ resource "azurerm_storage_container" "state" {
   name                  = "tfstate"
   storage_account_id    = azurerm_storage_account.state.id
   container_access_type = "private"
+}
+
+# ── The passphrase ─────────────────────────────────────────────────────────────────────────────────────
+
+# The one thing the committed state cannot carry is the passphrase that decrypts it, so the subscription
+# carries it: a vault of its own in the bootstrap group, RBAC like the service stack's, holding one secret
+# that `make bootstrap` reads back whenever `TF_VAR_state_passphrase` is unset. Whoever holds a secrets role
+# on this vault may decrypt the bootstrap state, and nobody else. A subscription that is gone takes it with
+# it, which is why the script still prints the passphrase once. Named like the registry, because a vault's
+# name is global too; seven days of soft delete, the least the product allows, so a torn-down project can be
+# bootstrapped again under the same name the same week.
+resource "azurerm_key_vault" "bootstrap" {
+  name                       = substr("kv${local.slug}${local.unique}", 0, 24)
+  resource_group_name        = azurerm_resource_group.bootstrap.name
+  location                   = azurerm_resource_group.bootstrap.location
+  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  sku_name                   = "standard"
+  rbac_authorization_enabled = true
+  soft_delete_retention_days = 7
+}
+
+# Owner of the subscription creates a vault and cannot read or write what is in one: the data plane is a
+# separate grant, and this is it — for whoever is applying, which is who reads it back later.
+resource "azurerm_role_assignment" "passphrase_officer" {
+  scope                = azurerm_key_vault.bootstrap.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# A role assignment takes some seconds to replicate, and the next thing this apply does is write into the
+# vault it has just granted itself; without the wait a first apply fails with a 403 that a second, identical
+# apply would not. The service stack waits the same way, for the same reason, and only on creation.
+resource "time_sleep" "passphrase_rbac" {
+  create_duration = "40s"
+
+  depends_on = [azurerm_role_assignment.passphrase_officer]
+}
+
+resource "azurerm_key_vault_secret" "state_passphrase" {
+  name         = "state-passphrase"
+  key_vault_id = azurerm_key_vault.bootstrap.id
+  value        = var.state_passphrase
+
+  depends_on = [time_sleep.passphrase_rbac]
 }
 
 # ── Who the pipeline is ────────────────────────────────────────────────────────────────────────────────
