@@ -84,13 +84,22 @@ REGISTRY_WORDS = {'cloud': 'Azure', 'registry': 'ACR', 'example': 'acrshop1a2b3c
 #: The parts of the deploy workflow that are Azure's. The job around them is the keel's.
 WORKFLOW = {'cli': '      - run: |\n'
            '          command -v az >/dev/null 2>&1 || curl -sSL https://aka.ms/InstallAzureCLIDeb | sudo bash\n',
-    'credentials': "      - if: ${{ secrets.AZURE_CLIENT_SECRET == '' }}\n"
+    # Which sign-in a job makes is asked of a step's output, never of `secrets` in an `if:` — GitHub does not
+    # offer that context there, and a workflow that asks is refused whole, before any job is made: a project
+    # generated for Azure began with a red trunk no agent was allowed to mend.
+    'credentials': '      - id: azure-sign-in\n'
+                   '        env:\n'
+                   '          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}\n'
+                   '        run: |\n'
+                   '          if [ -n "$AZURE_CLIENT_SECRET" ]; then echo "by=secret"; else echo "by=federation"; fi \\\n'
+                   '            >> "$GITHUB_OUTPUT"\n'
+                   "      - if: ${{ steps.azure-sign-in.outputs.by == 'federation' }}\n"
                    '        uses: azure/login@v2\n'
                    '        with:\n'
                    '          client-id: ${{ vars.AZURE_CLIENT_ID }}\n'
                    '          tenant-id: ${{ vars.AZURE_TENANT_ID }}\n'
                    '          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}\n'
-                   "      - if: ${{ secrets.AZURE_CLIENT_SECRET != '' }}\n"
+                   "      - if: ${{ steps.azure-sign-in.outputs.by == 'secret' }}\n"
                    '        env:\n'
                    '          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}\n'
                    '          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}\n'
