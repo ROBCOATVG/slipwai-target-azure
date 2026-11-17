@@ -122,7 +122,11 @@ WORKFLOW = {'cli': '      - run: |\n'
                    '  TOFU_STATE_RESOURCE_GROUP: ${{ vars.TOFU_STATE_RESOURCE_GROUP }}\n'
                    '  TOFU_STATE_ACCOUNT: ${{ vars.TOFU_STATE_ACCOUNT }}\n'
                    '  TOFU_STATE_CONTAINER: ${{ vars.TOFU_STATE_CONTAINER }}\n'
-                   '  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}\n'}
+                   '  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}\n',
+    # The variable whose absence means `make bootstrap` has not pointed this repository at a subscription
+    # yet: the client id is what every sign-in a job makes reads, by federation or by secret. A keel that
+    # reads `configured` skips the deploy pipeline whole until it is set; an older keel ignores the key.
+    'configured': 'AZURE_CLIENT_ID'}
 
 #: The nouns the README's *Production* section is written round.
 SECTION_WORDS = {'runtime': "one Container App per application deployed by revision behind\nthe environment's own ingress",
