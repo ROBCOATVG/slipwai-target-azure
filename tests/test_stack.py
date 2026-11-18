@@ -27,6 +27,13 @@ NEEDS_A_LANGUAGE = "generates a real project; the keel installs none, so this is
 
 @unittest.skipUnless(all(checkout_packages.installed(n) for n in ("go", "typescript")),
                      NEEDS_A_LANGUAGE)
+
+def dropped(path: Path) -> str:
+    """What is left of a file that held only a pruned region: nothing. The keel removes such a file rather
+    than emptying it (`prune.py`, "a file that was only a dropped region is removed, not emptied"), and an
+    earlier keel emptied it, so both read as gone."""
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
 class AzureStackTest(FactoryTestCase):
     def generate_azure(
         self, directory: str, name: str, backend: str = "typescript", frontend: str = "react-vite", **axes
@@ -132,7 +139,7 @@ class AzureStackTest(FactoryTestCase):
                 cwd=repo, check=True, capture_output=True,
             )
             self.assertNotIn("Application.ReadWrite", (repo / "infra/bootstrap/main.tf").read_text(encoding="utf-8"))
-            self.assertEqual((repo / "infra/service/entra_internal.tf").read_text(encoding="utf-8"), "")
+            self.assertFalse(dropped(repo / "infra/service/entra_internal.tf"), "infra/service/entra_internal.tf still holds a dropped region")
 
     def test_every_stack_validates_against_the_real_providers_before_and_after_a_prune(self) -> None:
         if shutil.which("tofu") is None:
@@ -149,8 +156,8 @@ class AzureStackTest(FactoryTestCase):
                 ["python3", "scripts/backing-services.py", "--persistence", "memory", "--auth", "none"],
                 cwd=maximal, check=True, capture_output=True,
             )
-            self.assertEqual((maximal / "infra/service/postgres.tf").read_text(encoding="utf-8"), "")
-            self.assertEqual((maximal / "infra/service/entra_internal.tf").read_text(encoding="utf-8"), "")
+            self.assertFalse(dropped(maximal / "infra/service/postgres.tf"), "infra/service/postgres.tf still holds a dropped region")
+            self.assertFalse(dropped(maximal / "infra/service/entra_internal.tf"), "infra/service/entra_internal.tf still holds a dropped region")
             self.assertNotIn("backing-service:postgres",
                 (maximal / "infra/service/main.tf").read_text(encoding="utf-8"))
             self.validate(maximal / "infra/service")
