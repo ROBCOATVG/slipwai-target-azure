@@ -3,6 +3,30 @@
 No releases yet. Release notes are recorded here newest first, one entry per released version; the entry being
 written is `changelog.d/`.
 
+## 1.3.0 — MINOR
+
+**A project pushed before its subscription is ready keeps a green trunk.** `deploy.yml` started on every push
+to `main` that passed `verify`, and failed at `azure/login` with `Not all values are present` until `make
+bootstrap` had written the repository's variables — and a fleet's harbourmaster lands nothing while trunk is
+red. The pipeline now answers the keel's optional `configured` key with `AZURE_CLIENT_ID`, the variable every
+sign-in reads; a keel that reads it skips the deploy, `production.yml` and `rollback.yml` whole until the
+variable is set, and the first push after `make bootstrap` deploys. A keel older than the key ignores it and
+generates the workflows it always did.
+
+**Catch-up:** run `slipwai migrate` in a project generated for Azure and commit the workflow files it
+rewrites.
+
+**A project generated for Azure no longer begins with a red trunk.** The deploy and rollback workflows chose
+between the federated sign-in and the client secret with `if: ${{ secrets.AZURE_CLIENT_SECRET == '' }}` on a
+step. GitHub does not offer `secrets` in an `if:`, and refuses the whole workflow file before any job is
+made, with no log — so `deploy.yml`, `rollback.yml` and a liner's `production.yml` failed on every push from
+the first commit, and a fleet's trunk mender, which may not edit an `if:`, could not clear it. Each job now
+asks once, in a step of its own, whether the secret is set, and the two sign-ins are chosen from that step's
+output.
+
+**Catch-up:** run `slipwai migrate` in a project generated for Azure and commit the three workflow files it
+rewrites; trunk goes green on that push.
+
 ## 1.2.0 — MINOR
 
 **The subscription keeps the passphrase that decrypts the committed bootstrap state.** The first
