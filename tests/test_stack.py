@@ -132,7 +132,7 @@ class AzureStackTest(FactoryTestCase):
                 cwd=repo, check=True, capture_output=True,
             )
             self.assertNotIn("Application.ReadWrite", (repo / "infra/bootstrap/main.tf").read_text(encoding="utf-8"))
-            self.assertEqual((repo / "infra/service/entra_internal.tf").read_text(encoding="utf-8"), "")
+            self.assertFalse((repo / "infra/service/entra_internal.tf").exists(), "a pruned region\'s file is removed, not left empty")
 
     def test_every_stack_validates_against_the_real_providers_before_and_after_a_prune(self) -> None:
         if shutil.which("tofu") is None:
@@ -149,8 +149,8 @@ class AzureStackTest(FactoryTestCase):
                 ["python3", "scripts/backing-services.py", "--persistence", "memory", "--auth", "none"],
                 cwd=maximal, check=True, capture_output=True,
             )
-            self.assertEqual((maximal / "infra/service/postgres.tf").read_text(encoding="utf-8"), "")
-            self.assertEqual((maximal / "infra/service/entra_internal.tf").read_text(encoding="utf-8"), "")
+            self.assertFalse((maximal / "infra/service/postgres.tf").exists(), "a pruned region\'s file is removed, not left empty")
+            self.assertFalse((maximal / "infra/service/entra_internal.tf").exists(), "a pruned region\'s file is removed, not left empty")
             self.assertNotIn("backing-service:postgres",
                 (maximal / "infra/service/main.tf").read_text(encoding="utf-8"))
             self.validate(maximal / "infra/service")
